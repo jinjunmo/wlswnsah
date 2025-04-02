@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D RPG 게임</title>
+    <style>
+        body { margin: 0; overflow: hidden; }
+        #game-container { position: relative; width: 100vw; height: 100vh; }
+        #renderer { display: block; }
+        #ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .ui-panel {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: auto;
+        }
+        #player-info { top: 10px; left: 10px; }
+        #skills-panel { bottom: 10px; right: 10px; }
+        #class-select { 
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            text-align: center;
+            pointer-events: auto;
+        }
+        .class-option {
+            display: inline-block;
+            margin: 15px;
+            padding: 15px;
+            border: 2px solid #444;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .class-option:hover {
+            border-color: #fff;
+            background-color: #333;
+        }
+        .skill-button {
+            margin: 5px;
+            padding: 8px 15px;
+            background-color: #4a4a4a;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            cursor: pointer;
+        }
+        .skill-button:hover {
+            background-color: #5a5a5a;
+        }
+        #tutorial-message {
+            position: absolute;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+            pointer-events: none;
+        }
+        #enemy-health {
+            position: absolute;
+            top: 60px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            pointer-events: none;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <!-- Three.js 렌더러가 여기에 생성됩니다 -->
+        <div id="ui-overlay">
+            <div id="player-info" class="ui-panel">
+                <h2>플레이어 정보</h2>
+                <p>직업: <span id="player-class">없음</span></p>
+                <p>레벨: <span id="player-level">1</span></p>
+                <p>체력: <span id="player-hp">100</span>/<span id="player-max-hp">100</span></p>
+                <p>마나: <span id="player-mana">50</span>/<span id="player-max-mana">50</span></p>
+                <p>처치한 몬스터: <span id="killed-enemies">0</span>/1</p>
+            </div>
+            
+            <div id="skills-panel" class="ui-panel hidden">
+                <h3>스킬 (Q/E/C/F)</h3>
+                <div id="skill-buttons"></div>
+            </div>
+            
+            <div id="class-select" class="hidden">
+                <h2>직업 선택 (좌클릭)</h2>
+                <div class="class-option" data-class="warrior">
+                    <h3>전사</h3>
+                    <p>강력한 근접 공격과 방어력</p>
+                    <p>스킬: Q) 돌격, E) 방패 막기, C) 광역 도발</p>
+                </div>
+                <div class="class-option" data-class="archer">
+                    <h3>궁수</h3>
+                    <p>정밀한 원거리 공격</p>
+                    <p>스킬: Q) 연속 사격, E) 관통 화살, C) 폭발 화살</p>
+                </div>
+                <div class="class-option" data-class="mage">
+                    <h3>마법사</h3>
+                    <p>강력한 마법 공격</p>
+                    <p>스킬: Q) 화염구, E) 얼음 창, C) 번개 폭풍</p>
+                </div>
+                <div class="class-option" data-class="rogue">
+                    <h3>도적</h3>
+                    <p>빠른 공격과 치명타</p>
+                    <p>스킬: Q) 은신, E) 독 칼, C) 연속 찌르기</p>
+                </div>
+            </div>
+            
+            <div id="tutorial-message">
+                <h2>튜토리얼</h2>
+                <p>마을 근처에 나타난 슬라임을 처치하세요!</p>
+                <p>마우스 왼쪽 버튼으로 기본 공격</p>
+                <p>몬스터를 1마리 처치하면 직업을 선택할 수 있습니다</p>
+            </div>
+            
+            <div id="enemy-health" class="hidden">
+                <p>몬스터 체력: <span id="enemy-hp">0</span>/<span id="enemy-max-hp">0</span></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js 라이브러리 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        // 게임 상태
+        const gameState = {
+            player: {
+                class: null,
+                level: 1,
+                maxHp: 100,
+                hp: 100,
+                maxMana: 50,
+                mana: 50,
+                attack: 10,
+                defense: 5,
+                agility: 5,
+                skills: [],
+                position: { x: 0, y: 0, z: 0 },
+                killedEnemies: 0,
+                canSelectClass: false
+            },
+            enemy: null,
+            scene: null,
+            camera: null,
+            renderer: null,
+            controls: null,
+            playerModel: null,
+            enemyModel: null,
+            isAttacking: false,
+            skillCooldowns: {}
+        };
+
+        // 직업별 스킬 데이터
+        const classSkills = {
+            warrior: [
+                { name: "돌격", key: 'q', cost: 10, cooldown: 5, action: chargeAttack },
+                { name: "방패 막기", key: 'e', cost: 15, cooldown: 8, action: shieldBlock },
+                { name: "광역 도발", key: 'c', cost: 20, cooldown: 15, action: aoeTaunt }
+            ],
+            archer: [
+                { name: "연속 사격", key: 'q', cost: 10, cooldown: 4, action: rapidShot },
+                { name: "관통 화살", key: 'e', cost: 15, cooldown: 7, action: piercingArrow },
+                { name: "폭발 화살", key: 'c', cost: 25, cooldown: 12, action: explosiveArrow }
+            ],
+            mage: [
+                { name: "화염구", key: 'q', cost: 15, cooldown: 5, action: fireball },
+                { name: "얼음 창", key: 'e', cost: 20, cooldown: 8, action: iceSpear },
+                { name: "번개 폭풍", key: 'c', cost: 30, cooldown: 15, action: lightningStorm }
+            ],
+            rogue: [
+                { name: "은신", key: 'q', cost: 20, cooldown: 20, action: stealth },
+                { name: "독 칼", key: 'e', cost: 15, cooldown: 10, action: poisonDagger },
+                { name: "연속 찌르기", key: 'c', cost: 25, cooldown: 12, action: flurryStab }
+            ]
+        };
+
+        // 스킬 함수들
+        function chargeAttack() {
+            if (gameState.enemy) {
+                const damage = gameState.player.attack * 1.5;
+                gameState.enemy.hp -= damage;
+                addGameLog(`돌격 스킬 사용! ${damage.toFixed(1)} 데미지!`);
+                updateEnemyUI();
+                checkEnemyDeath();
+            }
+        }
+
+        function shieldBlock() {
+            addGameLog("방패 막기 사용! 5초간 방어력 2배 증가!");
+            // 방어력 증가 로직 추가 가능
+        }
+
+        function aoeTaunt() {
+            addGameLog("광역 도발 사용! 주변 적들의 어그로를 끕니다!");
+            // 어그로 시스템 추가 가능
+        }
+
+        // 다른 스킬 함수들도 비슷하게 구현...
+        function rapidShot() {
+            if (gameState.enemy) {
+                const damage = gameState.player.attack * 0.8;
+                gameState.enemy.hp -= damage * 3; // 3회 타격
+                addGameLog(`연속 사격! ${damage.toFixed(1)} 데미지 3회!`);
+                updateEnemyUI();
+                checkEnemyDeath();
+            }
+        }
+
+        function fireball() {
+            if (gameState.enemy) {
+                const damage = gameState.player.attack * 2.0;
+                gameState.enemy.hp -= damage;
+                addGameLog(`화염구 사용! ${damage.toFixed(1)} 화염 데미지!`);
+                updateEnemyUI();
+                checkEnemyDeath();
+            }
+        }
+
+        function stealth() {
+            addGameLog("은신 사용! 10초간 몬스터에게 들키지 않습니다!");
+            // 은신 로직 추가 가능
+        }
+
+        // 게임 초기화
+        function initGame() {
+            // Three.js 초기화
+            initThreeJS();
+            
+            // 몬스터 생성
+            spawnEnemy();
+            
+            // 이벤트 리스너 설정
+            setupEventListeners();
+            
+            // UI 업데이트
+            updateUI();
+            
+            // 게임 로그
+            addGameLog("게임이 시작되었습니다! 슬라임을 처치하세요.");
+        }
+
+        // Three.js 초기화
+        function initThreeJS() {
+            // 장면 생성
+            gameState.scene = new THREE.Scene();
+            gameState.scene.background = new THREE.Color(0x87CEEB);
+            
+            // 카메라 설정
+            gameState.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            gameState.camera.position.set(0, 5, 10);
+            
+            // 렌더러 설정
+            gameState.renderer = new THREE.WebGLRenderer({ antialias: true });
+            gameState.renderer.setSize(window.innerWidth, window.innerHeight);
+            gameState.renderer.shadowMap.enabled = true;
+            document.getElementById('game-container').prepend(gameState.renderer.domElement);
+            
+            // 컨트롤 설정
+            gameState.controls = new THREE.OrbitControls(gameState.camera, gameState.renderer.domElement);
+            gameState.controls.target.set(0, 0, 0);
+            gameState.controls.enableDamping = true;
+            gameState.controls.dampingFactor = 0.05;
+            
+            // 조명 추가
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            gameState.scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            directionalLight.castShadow = true;
+            gameState.scene.add(directionalLight);
+            
+            // 바닥 생성
+            const groundGeometry = new THREE.PlaneGeometry(50, 50);
+            const groundMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x3a5f0b,
+                roughness: 0.8,
+                metalness: 0.2
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            gameState.scene.add(ground);
+            
+            // 플레이어 모델 생성
+            createPlayerModel();
+            
+            // 애니메이션 루프 시작
+            animate();
+        }
+
+        // 플레이어 모델 생성
+        function createPlayerModel() {
+            const geometry = new THREE.CylinderGeometry(0.5, 0.5, 1.8, 16);
+            const material = new THREE.MeshStandardMaterial({ color: 0x3498db });
+            gameState.playerModel = new THREE.Mesh(geometry, material);
+            gameState.playerModel.position.y = 0.9;
+            gameState.playerModel.castShadow = true;
+            gameState.scene.add(gameState.playerModel);
+        }
+
+        // 몬스터 생성
+        function spawnEnemy() {
+            // 기존 몬스터 제거
+            if (gameState.enemyModel) {
+                gameState.scene.remove(gameState.enemyModel);
+            }
+            
+            // 몬스터 데이터
+            gameState.enemy = {
+                name: "슬라임",
+                level: 1,
+                maxHp: 50,
+                hp: 50,
+                attack: 8,
+                defense: 2,
+                position: { x: 5, y: 0, z: 0 }
+            };
+            
+            // 몬스터 모델 생성
+            const geometry = new THREE.SphereGeometry(0.8, 16, 16);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x00aa00,
+                transparent: true,
+                opacity: 0.8
+            });
+            gameState.enemyModel = new THREE.Mesh(geometry, material);
+            gameState.enemyModel.position.set(
+                gameState.enemy.position.x,
+                0.8,
+                gameState.enemy.position.z
+            );
+            gameState.enemyModel.castShadow = true;
+            gameState.scene.add(gameState.enemyModel);
+            
+            // 몬스터 UI 표시
+            document.getElementById('enemy-health').classList.remove('hidden');
+            updateEnemyUI();
+        }
+
+        // 애니메이션 루프
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // 컨트롤 업데이트
+            gameState.controls.update();
+            
+            // 플레이어 모델 회전 (카메라 방향에 따라)
+            if (gameState.controls) {
+                gameState.playerModel.lookAt(
+                    gameState.camera.position.x,
+                    gameState.playerModel.position.y,
+                    gameState.camera.position.z
+                );
+            }
+            
+            // 공격 애니메이션
+            if (gameState.isAttacking) {
+                gameState.playerModel.position.y = 0.7 + Math.sin(Date.now() * 0.02) * 0.2;
+            } else {
+                gameState.playerModel.position.y = 0.9;
+            }
+            
+            // 렌더링
+            gameState.renderer.render(gameState.scene, gameState.camera);
+        }
+
+        // 이벤트 리스너 설정
+        function setupEventListeners() {
+            // 마우스 클릭 이벤트 (공격 또는 직업 선택)
+            document.addEventListener('click', (e) => {
+                if (e.button === 0) { // 좌클릭
+                    if (gameState.player.canSelectClass && gameState.enemy === null) {
+                        // 직업 선택 모드
+                        document.getElementById('class-select').classList.remove('hidden');
+                    } else if (gameState.enemy) {
+                        // 일반 공격
+                        basicAttack();
+                    }
+                }
+            });
+            
+            // 직업 선택 이벤트
+            document.querySelectorAll('.class-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    const selectedClass = this.getAttribute('data-class');
+                    selectClass(selectedClass);
+                });
+            });
+            
+            // 키보드 이벤트 (스킬 사용)
+            document.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                
+                // Q, E, C, F 키로 스킬 사용
+                if (['q', 'e', 'c', 'f'].includes(key) && gameState.player.class) {
+                    useSkillByKey(key);
+                }
+            });
+            
+            // 창 크기 조정 이벤트
+            window.addEventListener('resize', () => {
+                gameState.camera.aspect = window.innerWidth / window.innerHeight;
+                gameState.camera.updateProjectionMatrix();
+                gameState.renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        // 기본 공격
+        function basicAttack() {
+            if (gameState.enemy && !gameState.isAttacking) {
+                gameState.isAttacking = true;
+                
+                // 데미지 계산 및 적용
+                const damage = Math.max(1, gameState.player.attack - gameState.enemy.defense);
+                gameState.enemy.hp -= damage;
+                
+                addGameLog(`기본 공격! ${damage} 데미지!`);
+                updateEnemyUI();
+                
+                // 공격 애니메이션 종료
+                setTimeout(() => {
+                    gameState.isAttacking = false;
+                }, 300);
+                
+                // 몬스터 사망 확인
+                checkEnemyDeath();
+            }
+        }
+
+        // 몬스터 사망 확인
+        function checkEnemyDeath() {
+            if (gameState.enemy && gameState.enemy.hp <= 0) {
+                gameState.enemy.hp = 0;
+                addGameLog(`${gameState.enemy.name}를 처치했습니다!`);
+                
+                // 몬스터 제거
+                gameState.scene.remove(gameState.enemyModel);
+                gameState.enemy = null;
+                gameState.enemyModel = null;
+                document.getElementById('enemy-health').classList.add('hidden');
+                
+                // 처치 수 증가
+                gameState.player.killedEnemies++;
+                updateUI();
+                
+                // 직업 선택 가능 여부 확인
+                if (gameState.player.killedEnemies >= 1 && !gameState.player.class) {
+                    gameState.player.canSelectClass = true;
+                    document.getElementById('tutorial-message').innerHTML = `
+                        <h2>튜토리얼 완료!</h2>
+                        <p>이제 직업을 선택할 수 있습니다.</p>
+                        <p>화면 중앙의 직업 중 하나를 좌클릭으로 선택하세요.</p>
+                        <p>Q/E/C 키로 스킬을 사용할 수 있습니다.</p>
+                    `;
+                } else {
+                    // 3초 후 새 몬스터 생성
+                    setTimeout(spawnEnemy, 3000);
+                }
+            }
+        }
+
+        // 키보드로 스킬 사용
+        function useSkillByKey(key) {
+            if (!gameState.player.class || gameState.player.skills.length === 0) return;
+            
+            const skill = gameState.player.skills.find(s => s.key === key);
+            if (skill && !gameState.skillCooldowns[key]) {
+                if (gameState.player.mana >= skill.cost) {
+                    gameState.player.mana -= skill.cost;
+                    skill.action();
+                    updateUI();
+                    
+                    // 쿨다운 적용
+                    gameState.skillCooldowns[key] = true;
+                    setTimeout(() => {
+                        gameState.skillCooldowns[key] = false;
+                    }, skill.cooldown * 1000);
+                } else {
+                    addGameLog("마나가 부족합니다!");
+                }
+            }
+        }
+
+        // 직업 선택 함수
+        function selectClass(className) {
+            gameState.player.class = className;
+            gameState.player.canSelectClass = false;
+            
+            // 직업별 능력치 설정
+            switch(className) {
+                case 'warrior':
+                    gameState.player.maxHp = 150;
+                    gameState.player.hp = 150;
+                    gameState.player.attack = 15;
+                    gameState.player.defense = 10;
+                    gameState.player.agility = 3;
+                    gameState.playerModel.material.color.setHex(0x8B4513); // 갈색
+                    break;
+                case 'archer':
+                    gameState.player.maxHp = 100;
+                    gameState.player.hp = 100;
+                    gameState.player.attack = 12;
+                    gameState.player.defense = 5;
+                    gameState.player.agility = 10;
+                    gameState.playerModel.material.color.setHex(0x228B22); // 녹색
+                    break;
+                case 'mage':
+                    gameState.player.maxHp = 80;
+                    gameState.player.hp = 80;
+                    gameState.player.maxMana = 100;
+                    gameState.player.mana = 100;
+                    gameState.player.attack = 18;
+                    gameState.player.defense = 3;
+                    gameState.player.agility = 5;
+                    gameState.playerModel.material.color.setHex(0x9932CC); // 보라색
+                    break;
+                case 'rogue':
+                    gameState.player.maxHp = 90;
+                    gameState.player.hp = 90;
+                    gameState.player.attack = 14;
+                    gameState.player.defense = 4;
+                    gameState.player.agility = 15;
+                    gameState.playerModel.material.color.setHex(0x696969); // 어두운 회색
+                    break;
+            }
+            
+            // 스킬 설정
+            gameState.player.skills = classSkills[className];
+            
+            // UI 업데이트
+            updateUI();
+            
+            // 직업 선택 UI 숨기기
+            document.getElementById('class-select').classList.add('hidden');
+            
+            // 스킬 버튼 생성 및 표시
+            createSkillButtons();
+            document.getElementById('skills-panel').classList.remove('hidden');
+            
+            // 튜토리얼 메시지 숨기기
+            document.getElementById('tutorial-message').classList.add('hidden');
+            
+            addGameLog(`${className} 직업을 선택하셨습니다! Q/E/C 키로 스킬을 사용할 수 있습니다.`);
+            
+            // 새 몬스터 생성
+            spawnEnemy();
+        }
+
+        // 스킬 버튼 생성
+        function createSkillButtons() {
+            const skillButtonsContainer = document.getElementById('skill-buttons');
+            skillButtonsContainer.innerHTML = '';
+            
+            gameState.player.skills.forEach((skill) => {
+                const button = document.createElement('button');
+                button.className = 'skill-button';
+                button.textContent = `${skill.name} (${skill.key.toUpperCase()})`;
+                button.addEventListener('click', () => useSkillByKey(skill.key));
+                skillButtonsContainer.appendChild(button);
+            });
+        }
+
+        // UI 업데이트
+        function updateUI() {
+            document.getElementById('player-class').textContent = gameState.player.class || "없음";
+            document.getElementById('player-level').textContent = gameState.player.level;
+            document.getElementById('player-hp').textContent = gameState.player.hp;
+            document.getElementById('player-max-hp').textContent = gameState.player.maxHp;
+            document.getElementById('player-mana').textContent = gameState.player.mana;
+            document.getElementById('player-max-mana').textContent = gameState.player.maxMana;
+            document.getElementById('killed-enemies').textContent = gameState.player.killedEnemies;
+        }
+
+        // 적 UI 업데이트
+        function updateEnemyUI() {
+            if (gameState.enemy) {
+                document.getElementById('enemy-hp').textContent = gameState.enemy.hp;
+                document.getElementById('enemy-max-hp').textContent = gameState.enemy.maxHp;
+            }
+        }
+
+        // 게임 로그 추가
+        function addGameLog(message) {
+            console.log(message); // 콘솔에도 출력 (디버깅용)
+            // 실제 게임에서는 더 멋진 로그 시스템을 구현할 수 있음
+        }
+
+        // 게임 시작
+        initGame();
+    </script>
+</body>
+</html>
